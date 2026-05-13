@@ -482,56 +482,77 @@ function bd = compute_bd(I, I_emb)
 end
 
 % ==========================================================================
-%  SYNTHETIC COLOR TEST IMAGE GENERATOR
+%  REAL DATASET LOADER (McMaster 18 + USC-SIPI 7)  ← REAL DATA
 % ==========================================================================
 function [imgs, names] = generate_test_images()
-    imgs = cell(6,1); sz = 512;
-    % USC-SIPI style
-    rng(1); I=zeros(sz,sz,3,'uint8');
-    [X,Y]=meshgrid(1:sz,1:sz);
-    I(:,:,1)=uint8(min(255,128+round(80*sin(X/30).*cos(Y/30))));
-    I(:,:,2)=uint8(min(255,100+round(60*cos(X/20+Y/20))));
-    I(:,:,3)=uint8(min(255,90+round(70*sin(X/40))));
-    imgs{1}=I;
+% Loads real datasets when available:
+%   McMaster  → C:\iiitvd\RDH_2DHIST_Matlab\data\mcmaster\  (18 TIF, 500x500 RGB)
+%   USC-SIPI  → C:\iiitvd\RDH_2DHIST_Matlab\data\usc_sipi\  (7 TIFF, 512x512)
+% Falls back to synthetic if not found.
 
-    rng(2); I=zeros(sz,sz,3,'uint8');
-    I(:,:,1)=uint8(min(255,max(0,128+round(80*randn(sz)))));
-    I(:,:,2)=uint8(min(255,max(0,110+round(70*randn(sz)))));
-    I(:,:,3)=uint8(min(255,max(0,95+round(65*randn(sz)))));
-    imgs{2}=I;
+    imgs  = {};  names = {};
 
-    % Kodak style 768x512
-    sz2=[512,768];
-    rng(3); I=zeros(sz2(1),sz2(2),3,'uint8');
-    [X,Y]=meshgrid(1:sz2(2),1:sz2(1));
-    I(:,:,1)=uint8(min(255,140+round(60*sin(X/50).*cos(Y/50))));
-    I(:,:,2)=uint8(min(255,120+round(50*cos(X/40))));
-    I(:,:,3)=uint8(min(255,100+round(70*sin(Y/60))));
-    imgs{3}=I;
+    % ----- McMaster (18 images, 500x500 color) -----
+    mcm_dir = fullfile(fileparts(mfilename('fullpath')), 'data', 'mcmaster');
+    if exist(mcm_dir, 'dir')
+        tifs = dir(fullfile(mcm_dir, '*.tif'));
+        nums = zeros(1,numel(tifs));
+        for k=1:numel(tifs)
+            [~,nm]=fileparts(tifs(k).name); nums(k)=str2double(nm);
+        end
+        [~,si]=sort(nums); tifs=tifs(si);
+        for k=1:numel(tifs)
+            try
+                I=imread(fullfile(mcm_dir,tifs(k).name));
+                if size(I,3)>=3
+                    imgs{end+1}=I(:,:,1:3);
+                    names{end+1}=sprintf('McM_%02d',k);
+                end
+            catch; end
+        end
+        fprintf('[Dataset] McMaster: %d real images loaded\n', numel(imgs));
+    end
 
-    rng(4); I=zeros(sz2(1),sz2(2),3,'uint8');
-    I(:,:,1)=uint8(min(255,max(0,150+round(50*randn(sz2)))));
-    I(:,:,2)=uint8(min(255,max(0,130+round(40*randn(sz2)))));
-    I(:,:,3)=uint8(min(255,max(0,110+round(55*randn(sz2)))));
-    imgs{4}=I;
+    % ----- USC-SIPI (7 images, 512x512 gray) — convert to RGB -----
+    sipi_dir = fullfile(fileparts(mfilename('fullpath')), 'data', 'usc_sipi');
+    n_sipi = 0;
+    if exist(sipi_dir, 'dir')
+        tiffs = dir(fullfile(sipi_dir, '*.tiff'));
+        for k=1:numel(tiffs)
+            try
+                raw=imread(fullfile(sipi_dir,tiffs(k).name));
+                if size(raw,3)==1
+                    raw=repmat(raw,[1,1,3]);   % gray→RGB
+                end
+                if size(raw,1)>=256
+                    imgs{end+1}=raw(:,:,1:3);
+                    [~,nm,~]=fileparts(tiffs(k).name);
+                    names{end+1}=nm; n_sipi=n_sipi+1;
+                end
+            catch; end
+        end
+        fprintf('[Dataset] USC-SIPI: %d real images loaded\n', n_sipi);
+    end
 
-    % McMaster style 500x500 (contrast-reduced by alpha=0.7, Eq.14)
-    sz3=500;
-    rng(5); I_raw=zeros(sz3,sz3,3,'uint8');
-    [X,Y]=meshgrid(1:sz3,1:sz3);
-    I_raw(:,:,1)=uint8(min(255,160+round(70*sin(X/35).*cos(Y/35))));
-    I_raw(:,:,2)=uint8(min(255,140+round(55*cos(X/25+Y/25))));
-    I_raw(:,:,3)=uint8(min(255,120+round(65*sin(X/45))));
-    alpha=0.7; Iavg=mean(double(I_raw(:)));
-    I_red=uint8(max(0,min(255,round(Iavg+alpha*(double(I_raw)-Iavg)))));
-    imgs{5}=I_red;
-
-    rng(6); I_raw=zeros(sz3,sz3,3,'uint8');
-    I_raw(:,:,1)=uint8(min(255,max(0,155+round(65*randn(sz3)))));
-    I_raw(:,:,2)=uint8(min(255,max(0,135+round(50*randn(sz3)))));
-    I_raw(:,:,3)=uint8(min(255,max(0,115+round(60*randn(sz3)))));
-    Iavg=mean(double(I_raw(:)));
-    imgs{6}=uint8(max(0,min(255,round(Iavg+alpha*(double(I_raw)-Iavg)))));
-
-    names={'USC_Lena','USC_Baboon','Kodak01','Kodak02','McMaster01','McMaster02'};
+    % ----- Synthetic fallback if no real data -----
+    if numel(imgs) < 3
+        fprintf('[Dataset] Using synthetic color images (real datasets not found)\n');
+        alpha=0.7; sz=500;
+        rng(1); I=zeros(sz,sz,3,'uint8');
+        [X,Y]=meshgrid(1:sz,1:sz);
+        I(:,:,1)=uint8(min(255,160+round(60*sin(X/35).*cos(Y/35))));
+        I(:,:,2)=uint8(min(255,140+round(55*cos(X/25+Y/25))));
+        I(:,:,3)=uint8(min(255,120+round(65*sin(X/45))));
+        Iavg=mean(double(I(:)));
+        imgs{end+1}=uint8(max(0,min(255,round(Iavg+alpha*(double(I)-Iavg)))));
+        names{end+1}='Synth_McM01';
+        rng(5); I=zeros(sz,sz,3,'uint8');
+        I(:,:,1)=uint8(min(255,max(0,155+round(65*randn(sz)))));
+        I(:,:,2)=uint8(min(255,max(0,135+round(50*randn(sz)))));
+        I(:,:,3)=uint8(min(255,max(0,115+round(60*randn(sz)))));
+        Iavg=mean(double(I(:)));
+        imgs{end+1}=uint8(max(0,min(255,round(Iavg+alpha*(double(I)-Iavg)))));
+        names{end+1}='Synth_McM02';
+    end
 end
+
